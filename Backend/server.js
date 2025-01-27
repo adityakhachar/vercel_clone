@@ -108,7 +108,6 @@ app.post("/api/aws", async (req, res) => {
   }
 });
 
-// --- API Endpoint to Validate Credentials, Clone Repo, and Deploy ---
 app.post("/api/validate-and-deploy", async (req, res) => {
   const { gitUrl, branch, bucketName, accessKeyId, secretAccessKey, region } = req.body;
 
@@ -118,7 +117,7 @@ app.post("/api/validate-and-deploy", async (req, res) => {
   }
 
   try {
-    // Debug: Log both AWS and GitHub Credentials
+    // Log credentials
     console.log("Deployment credentials received:");
     console.log(`GitHub URL: ${gitUrl}`);
     console.log(`Branch: ${branch}`);
@@ -135,56 +134,68 @@ app.post("/api/validate-and-deploy", async (req, res) => {
 
     const s3 = new AWS.S3();
 
-    // Create a directory to clone the GitHub repo into
+    // Clone the GitHub repository
     const tempDir = path.join(__dirname, "repo");
     if (fs.existsSync(tempDir)) {
       fs.rmdirSync(tempDir, { recursive: true }); // Clean up existing directory
     }
     fs.mkdirSync(tempDir); // Create fresh directory
 
-    // Clone the GitHub repository using simple-git
     const git = simpleGit();
     console.log(`Cloning ${gitUrl} branch ${branch} into ${tempDir}...`);
     await git.clone(gitUrl, tempDir, ["--branch", branch]);
 
-    // Upload files from the cloned repository to S3
-    const files = fs.readdirSync(tempDir);
-    for (let file of files) {
-      const filePath = path.join(tempDir, file);
+    // Create a .yaml file for GitHub Actions or any CI/CD pipeline
+    const yamlFileContent = `
+name: Deploy to AWS S3
 
-      // Check if it's a file or directory
-      const stats = fs.statSync(filePath);
-      if (stats.isDirectory()) {
-        // Skip directories
-        continue;
-      }
+on:
+  push:
+    branches:
+      - ${branch}
 
-      const fileStream = fs.createReadStream(filePath);
-      const fileMimeType = mime.lookup(filePath) || "application/octet-stream";
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Install AWS CLI
+        run: sudo apt-get install awscli
+      - name: Configure AWS CLI
+        run: aws configure set aws_access_key_id ${accessKeyId} && aws configure set aws_secret_access_key ${secretAccessKey} && aws configure set region ${region}
+      - name: Deploy to S3
+        run: |
+          aws s3 sync ./ s3://${bucketName}/ --exact-timestamps --delete
+    `;
+    const yamlFilePath = path.join(tempDir, ".github", "workflows", "deploy.yaml");
 
-      const params = {
-        Bucket: bucketName,
-        Key: file,
-        Body: fileStream,
-        ContentType: fileMimeType,
-      };
-
-      await s3.upload(params).promise();
-      console.log(`Uploaded ${file} to S3`);
+    // Ensure directory structure exists for YAML file
+    const dir = path.dirname(yamlFilePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
     }
 
-    // Clean up the cloned repository directory after the upload
+    // Write YAML file
+    fs.writeFileSync(yamlFilePath, yamlFileContent);
+    console.log("YAML file created at:", yamlFilePath);
+
+    // Commit and push the changes to GitHub
+    await git.add("./*");
+    await git.commit("Add GitHub Actions deployment YAML file.");
+    await git.push("origin", branch);
+
+    // Clean up the cloned repository directory after the push
     fs.rmdirSync(tempDir, { recursive: true });
 
     res.status(200).json({
-      message: "GitHub repo cloned and deployed to AWS S3 successfully!",
+      message: "GitHub repo cloned, YAML deployed, and changes pushed to GitHub.",
     });
   } catch (error) {
     console.error("Error during deployment:", error.message);
     res.status(500).json({ error: error.message });
   }
 });
-
 // Start the server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
