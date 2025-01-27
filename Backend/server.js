@@ -3,11 +3,18 @@ import cors from "cors";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 import AWS from "aws-sdk";
-import simpleGit from "simple-git";  // To interact with Git repositories
-import fs from "fs";  // For file operations
+import simpleGit from "simple-git"; // To interact with Git repositories
+import fs from "fs"; // For file operations
 import path from "path";
 import mime from "mime-types";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
 
+// Define __filename and __dirname for ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load environment variables
 dotenv.config();
 
 const app = express();
@@ -16,20 +23,29 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// GitHub API Endpoint
+// --- GitHub API endpoint ---
 app.post("/api/github", async (req, res) => {
   const { token, username, repository } = req.body;
 
+  // Validate inputs
   if (!token || !username || !repository) {
     return res.status(400).json({ error: "Token, username, and repository are required." });
   }
 
   try {
+    // Debug: Log the provided GitHub credentials (excluding token)
+    console.log("GitHub credentials received:");
+    console.log(`Username: ${username}`);
+    console.log(`Repository: ${repository}`);
+    console.log(`Token: ${token ? "Provided" : "Not Provided"}`);
+
     const apiUrl = `https://api.github.com/repos/${username}/${repository}`;
     
+    // GitHub API request to check if the credentials are valid
     const response = await fetch(apiUrl, {
       headers: {
         Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github.v3+json",
       },
     });
 
@@ -47,19 +63,26 @@ app.post("/api/github", async (req, res) => {
       repositoryData: data,
     });
   } catch (error) {
+    console.error("Error during GitHub API request:", error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-// AWS Credentials Validation Endpoint
+// --- AWS Credentials Validation Endpoint ---
 app.post("/api/aws", async (req, res) => {
   const { accessKeyId, secretAccessKey, region } = req.body;
 
+  // Validate the required fields
   if (!accessKeyId || !secretAccessKey || !region) {
     return res.status(400).json({ error: "Access Key, Secret Key, and Region are required." });
   }
 
   try {
+    // Debug: Log AWS credentials (except secretAccessKey)
+    console.log("AWS credentials received:");
+    console.log(`Access Key: ${accessKeyId}`);
+    console.log(`Region: ${region}`);
+
     AWS.config.update({
       accessKeyId,
       secretAccessKey,
@@ -68,6 +91,7 @@ app.post("/api/aws", async (req, res) => {
 
     const s3 = new AWS.S3();
 
+    // Attempt to list S3 buckets
     s3.listBuckets((err, data) => {
       if (err) {
         return res.status(500).json({ error: "AWS Connection Failed.", details: err.message });
@@ -79,85 +103,87 @@ app.post("/api/aws", async (req, res) => {
       });
     });
   } catch (error) {
+    console.error("Error during AWS credentials validation:", error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
+// --- API Endpoint to Validate Credentials, Clone Repo, and Deploy ---
 app.post("/api/validate-and-deploy", async (req, res) => {
-  const { gitUrl, branch, bucketName } = req.body;
+  const { gitUrl, branch, bucketName, accessKeyId, secretAccessKey, region } = req.body;
 
-  if (!gitUrl || !bucketName) {
-    return res.status(400).json({ success: false, message: "Missing required fields." });
+  // Check if all required fields are present
+  if (!gitUrl || !branch || !bucketName || !accessKeyId || !secretAccessKey || !region) {
+    return res.status(400).json({ error: "All fields are required." });
   }
 
   try {
-    // Step 1: Clone or Pull the GitHub repository
-    const repoFolder = "./repo"; // Temporary directory for repo
-    const git = simpleGit();
+    // Debug: Log both AWS and GitHub Credentials
+    console.log("Deployment credentials received:");
+    console.log(`GitHub URL: ${gitUrl}`);
+    console.log(`Branch: ${branch}`);
+    console.log(`Bucket Name: ${bucketName}`);
+    console.log(`AWS Access Key: ${accessKeyId}`);
+    console.log(`AWS Region: ${region}`);
 
-    if (fs.existsSync(repoFolder)) {
-      // If repo exists, pull the latest code
-      await git.cwd(repoFolder).pull();
-    } else {
-      // Clone the repository if it doesn't exist
-      await git.clone(gitUrl, repoFolder);
-    }
+    // Validate AWS credentials
+    AWS.config.update({
+      accessKeyId,
+      secretAccessKey,
+      region,
+    });
 
-    // Checkout the desired branch
-    await git.cwd(repoFolder).checkout(branch);
-
-    // Step 2: Sync the static files to the S3 bucket
     const s3 = new AWS.S3();
 
-    // Recursive file upload
-    const uploadFiles = async (folder) => {
-      const filePaths = [];
+    // Create a directory to clone the GitHub repo into
+    const tempDir = path.join(__dirname, "repo");
+    if (fs.existsSync(tempDir)) {
+      fs.rmdirSync(tempDir, { recursive: true }); // Clean up existing directory
+    }
+    fs.mkdirSync(tempDir); // Create fresh directory
 
-      const files = fs.readdirSync(folder);
-      for (const file of files) {
-        const filePath = path.join(folder, file);
+    // Clone the GitHub repository using simple-git
+    const git = simpleGit();
+    console.log(`Cloning ${gitUrl} branch ${branch} into ${tempDir}...`);
+    await git.clone(gitUrl, tempDir, ["--branch", branch]);
 
-        if (fs.statSync(filePath).isDirectory()) {
-          filePaths.push(...(await uploadFiles(filePath)));
-        } else {
-          const fileKey = path.relative(repoFolder, filePath);
-          const fileContent = fs.readFileSync(filePath);
+    // Upload files from the cloned repository to S3
+    const files = fs.readdirSync(tempDir);
+    for (let file of files) {
+      const filePath = path.join(tempDir, file);
 
-          // Determine the correct ContentType
-          const contentType = mime.lookup(filePath) || "application/octet-stream";
-
-          const params = {
-            Bucket: bucketName,
-            Key: fileKey,
-            Body: fileContent,
-            ContentType: contentType, // Set the ContentType for the file
-          };
-
-          // Upload file to S3
-          await s3.upload(params).promise();
-          filePaths.push(fileKey);
-        }
+      // Check if it's a file or directory
+      const stats = fs.statSync(filePath);
+      if (stats.isDirectory()) {
+        // Skip directories
+        continue;
       }
 
-      return filePaths;
-    };
+      const fileStream = fs.createReadStream(filePath);
+      const fileMimeType = mime.lookup(filePath) || "application/octet-stream";
 
-    // Upload files and capture their paths
-    const uploadedFiles = await uploadFiles(repoFolder);
+      const params = {
+        Bucket: bucketName,
+        Key: file,
+        Body: fileStream,
+        ContentType: fileMimeType,
+      };
 
-    // Generate S3 URLs for the uploaded files (index.html in this example)
-    const indexFile = uploadedFiles.find((file) => file.endsWith("index.html"));
-    const s3Url = indexFile
-      ? `https://${bucketName}.s3.${process.env.AWS_REGION}.amazonaws.com/${indexFile}`
-      : null;
+      await s3.upload(params).promise();
+      console.log(`Uploaded ${file} to S3`);
+    }
 
-    res.json({ success: true, s3Url, uploadedFiles });
+    // Clean up the cloned repository directory after the upload
+    fs.rmdirSync(tempDir, { recursive: true });
+
+    res.status(200).json({
+      message: "GitHub repo cloned and deployed to AWS S3 successfully!",
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("Error during deployment:", error.message);
+    res.status(500).json({ error: error.message });
   }
 });
-
-
 
 // Start the server
 const PORT = process.env.PORT || 5000;
