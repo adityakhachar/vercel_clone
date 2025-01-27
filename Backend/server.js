@@ -5,6 +5,8 @@ import dotenv from "dotenv";
 import AWS from "aws-sdk";
 import simpleGit from "simple-git";  // To interact with Git repositories
 import fs from "fs";  // For file operations
+import path from "path";
+import mime from "mime-types";
 
 dotenv.config();
 
@@ -81,7 +83,6 @@ app.post("/api/aws", async (req, res) => {
   }
 });
 
-// Deploy Endpoint (GitHub to S3)
 app.post("/api/validate-and-deploy", async (req, res) => {
   const { gitUrl, branch, bucketName } = req.body;
 
@@ -108,29 +109,55 @@ app.post("/api/validate-and-deploy", async (req, res) => {
     // Step 2: Sync the static files to the S3 bucket
     const s3 = new AWS.S3();
 
-    const uploadDir = fs.readdirSync(repoFolder); // Get list of files
-    for (let file of uploadDir) {
-      const filePath = `${repoFolder}/${file}`;
-      if (fs.statSync(filePath).isFile()) {
-        const fileContent = fs.readFileSync(filePath);
-        const params = {
-          Bucket: bucketName,
-          Key: file, // Upload file with the same name
-          Body: fileContent,
-        };
+    // Recursive file upload
+    const uploadFiles = async (folder) => {
+      const filePaths = [];
 
-        await s3.upload(params).promise();
+      const files = fs.readdirSync(folder);
+      for (const file of files) {
+        const filePath = path.join(folder, file);
+
+        if (fs.statSync(filePath).isDirectory()) {
+          filePaths.push(...(await uploadFiles(filePath)));
+        } else {
+          const fileKey = path.relative(repoFolder, filePath);
+          const fileContent = fs.readFileSync(filePath);
+
+          // Determine the correct ContentType
+          const contentType = mime.lookup(filePath) || "application/octet-stream";
+
+          const params = {
+            Bucket: bucketName,
+            Key: fileKey,
+            Body: fileContent,
+            ContentType: contentType, // Set the ContentType for the file
+          };
+
+          // Upload file to S3
+          await s3.upload(params).promise();
+          filePaths.push(fileKey);
+        }
       }
-    }
 
-    // Step 3: Return the S3 URL (Optional, you can structure it based on how you serve the content from S3)
-    const s3Url = `https://${bucketName}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadDir[0]}`;
-    
-    res.json({ success: true, s3Url });
+      return filePaths;
+    };
+
+    // Upload files and capture their paths
+    const uploadedFiles = await uploadFiles(repoFolder);
+
+    // Generate S3 URLs for the uploaded files (index.html in this example)
+    const indexFile = uploadedFiles.find((file) => file.endsWith("index.html"));
+    const s3Url = indexFile
+      ? `https://${bucketName}.s3.${process.env.AWS_REGION}.amazonaws.com/${indexFile}`
+      : null;
+
+    res.json({ success: true, s3Url, uploadedFiles });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
+
 
 // Start the server
 const PORT = process.env.PORT || 5000;

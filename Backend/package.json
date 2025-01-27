@@ -18,6 +18,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "fs-extra": "^11.3.0",
+    "mime-types": "^2.1.35",
     "node-fetch": "^2.7.0",
     "simple-git": "^3.27.0"
   },
