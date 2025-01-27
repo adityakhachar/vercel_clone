@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from "react";
-import { Box, TextField, Button, Typography, Grid, Paper } from "@mui/material";
+import {
+  Box,
+  TextField,
+  Button,
+  Typography,
+  Grid,
+  Paper,
+} from "@mui/material";
+// Helper function to retrieve temporary storage
 const getTempStorage = (key) => {
   try {
     const data = localStorage.getItem(key);
@@ -9,6 +17,7 @@ const getTempStorage = (key) => {
     return null;
   }
 };
+
 const AWSForm = () => {
   const [formData, setFormData] = useState({
     accessKeyId: "",
@@ -39,8 +48,12 @@ const AWSForm = () => {
   const handleSubmit = (e) => {
     e.preventDefault();
     console.log("Deploy Form Data Submitted:", formData);
-
+  
     const apiUrl = "http://localhost:5000/api/validate-and-deploy";
+  
+    // Retrieve token from localStorage
+    const githubTokenFromLocalStorage = githubData?.token;
+    console.log("GitHub Token from Local Storage:", githubTokenFromLocalStorage);
   
     // POST request to the backend API
     fetch(apiUrl, {
@@ -54,19 +67,28 @@ const AWSForm = () => {
       .then((data) => {
         console.log("Response from server:", data);
   
-        if (data.githubData && data.githubData.token) {
-          // Safe destructuring
-          const { token, username, repository } = data.githubData;
-          alert("AWS and GitHub credentials validated, and data ready for deployment.");
+        // Handle cases where githubData or token is missing in response
+        const githubTokenFromServer = data?.githubData?.token || null;
+        console.log("GitHub Token from Server:", githubTokenFromServer);
   
-          // Proceed with deployment logic here
+        if (!githubTokenFromLocalStorage || !githubTokenFromServer) {
+          console.log("One or both tokens are missing!");
+        } else if (githubTokenFromLocalStorage === githubTokenFromServer) {
+          console.log("Tokens match!");
+        } else {
+          console.log("Tokens do not match!");
+        }
+  
+        if (data.githubData && githubTokenFromServer) {
+          alert(
+            "AWS and GitHub credentials validated, and data ready for deployment."
+          );
         } else {
           alert("Error: Missing or invalid GitHub credentials.");
         }
-        
+  
         if (data.awsData) {
           alert("AWS Credentials Validated Successfully!");
-          // Handle further navigation here, if needed.
         } else if (data.error) {
           alert(`Error: ${data.error}`);
         }
@@ -75,7 +97,7 @@ const AWSForm = () => {
         console.error("Error occurred:", error);
       });
   };
-
+  
   return (
     <Box
       sx={{

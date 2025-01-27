@@ -1,7 +1,16 @@
 import React, { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { Box, TextField, Button, Typography, Grid, Paper } from "@mui/material";
-import { setTempStorage } from "./tempStorage";
+
+// Helper function to store data in local storage
+const setTempStorage = (key, value) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    console.log(`Data stored in localStorage: ${key} =`, value);
+  } catch (error) {
+    console.error("Error storing data in localStorage", error);
+  }
+};
 
 const GitHubForm = () => {
   const [formData, setFormData] = useState({
@@ -16,14 +25,17 @@ const GitHubForm = () => {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prevData) => ({ ...prevData, [name]: value }));
+    console.log(`Input changed: ${name} = ${value}`);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    console.log("Form submitted with data:", formData);
     setIsLoading(true);
     setErrorMessage("");
 
     try {
+      console.log("Sending API request...");
       const response = await fetch("http://localhost:5000/api/github", {
         method: "POST",
         headers: {
@@ -32,23 +44,33 @@ const GitHubForm = () => {
         body: JSON.stringify(formData),
       });
 
+      console.log("Response received:", response);
       const data = await response.json();
+      console.log("Response JSON:", data);
+
       if (response.ok) {
+        console.log("Repository verification successful.");
+
+        // Store GitHub data in local storage
         setTempStorage("githubData", formData);
+
         alert("GitHub repository verified successfully!");
         setRedirectToAWSForm(true);
       } else {
+        console.error("Verification failed with message:", data.message);
         setErrorMessage(data.message || "GitHub repository verification failed.");
       }
     } catch (error) {
       console.error("Error occurred:", error);
       setErrorMessage("An error occurred while verifying the repository.");
     } finally {
+      console.log("Request completed.");
       setIsLoading(false);
     }
   };
 
   if (redirectToAWSForm) {
+    console.log("Redirecting to AWS form...");
     return <Navigate to="/awsform" />;
   }
 
@@ -71,7 +93,11 @@ const GitHubForm = () => {
           width: "100%",
         }}
       >
-        <Typography variant="h5" align="center" sx={{ mb: 3, fontWeight: "bold", color: "#1976d2" }}>
+        <Typography
+          variant="h5"
+          align="center"
+          sx={{ mb: 3, fontWeight: "bold", color: "#1976d2" }}
+        >
           GitHub Repository Checker
         </Typography>
         <form onSubmit={handleSubmit}>
