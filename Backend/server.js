@@ -175,7 +175,7 @@ jobs:
     await git.push("origin", branch);
 
     // Clean up the cloned repository directory after the push
-    fs.rmdirSync(tempDir, { recursive: true });
+    // fs.rmdirSync(tempDir, { recursive: true });
 
     res.status(200).json({
       message: "GitHub repo cloned, YAML deployed, and changes pushed to GitHub.",
