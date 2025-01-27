@@ -23,20 +23,20 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- GitHub API endpoint ---
 app.post("/api/github", async (req, res) => {
   const { token, username, repository } = req.body;
 
   // Validate inputs
   if (!token || !username || !repository) {
+    console.log("Missing GitHub token, username, or repository in request.");
     return res.status(400).json({ error: "Token, username, and repository are required." });
   }
 
   try {
     const apiUrl = `https://api.github.com/repos/${username}/${repository}`;
     console.log("GitHub API URL:", apiUrl);
-    
-    // GitHub API request to check if the credentials are valid
+
+    // GitHub API request to check credentials
     const response = await fetch(apiUrl, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -44,16 +44,27 @@ app.post("/api/github", async (req, res) => {
       },
     });
 
+    // Log the response status
+    console.log("GitHub API response status:", response.status);
+
     if (response.status === 401) {
+      console.log("Invalid GitHub token or access denied.");
       return res.status(401).json({ error: "Invalid GitHub token or access denied." });
     }
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch repository: ${response.statusText} (HTTP ${response.status})`);
+      console.log(
+        `Failed to fetch repository (Status: ${response.status}). Status Text: ${response.statusText}`
+      );
+      throw new Error(
+        `Failed to fetch repository: ${response.statusText} (HTTP ${response.status})`
+      );
     }
 
     const data = await response.json();
-    console.log("GitHub API response:", data);
+    console.log("GitHub API response data:", JSON.stringify(data, null, 2));
+    console.log("GitHub credentials validated successfully.");
+
     res.status(200).json({
       message: "GitHub connection validated successfully.",
       repositoryData: data,
