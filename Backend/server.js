@@ -33,12 +33,6 @@ app.post("/api/github", async (req, res) => {
   }
 
   try {
-    // Debug: Log the provided GitHub credentials (excluding token)
-    console.log("GitHub credentials received:");
-    console.log(`Username: ${username}`);
-    console.log(`Repository: ${repository}`);
-    console.log(`Token: ${token ? "Provided" : "Not Provided"}`);
-
     const apiUrl = `https://api.github.com/repos/${username}/${repository}`;
     
     // GitHub API request to check if the credentials are valid
@@ -78,11 +72,6 @@ app.post("/api/aws", async (req, res) => {
   }
 
   try {
-    // Debug: Log AWS credentials (except secretAccessKey)
-    console.log("AWS credentials received:");
-    console.log(`Access Key: ${accessKeyId}`);
-    console.log(`Region: ${region}`);
-
     AWS.config.update({
       accessKeyId,
       secretAccessKey,
@@ -196,6 +185,7 @@ jobs:
     res.status(500).json({ error: error.message });
   }
 });
+
 // Start the server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
